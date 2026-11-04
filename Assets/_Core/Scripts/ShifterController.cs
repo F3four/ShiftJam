@@ -13,6 +13,10 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
     [SerializeField] private float _maxDragDistance = 120f;
     [SerializeField] private float _lerpSpeed = 20f; // Adjustable lerp speed for shifter movement
 
+    [SerializeField] private AudioSource _audio;
+    [SerializeField] private AudioClip _shiftSound;
+    [SerializeField] private AudioClip _shiftSoundNeutral;
+
     private Vector2 _centerPosition;
     private Vector2 _targetOffset;
     private Vector2 _currentOffset;
@@ -54,9 +58,18 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
         UpdateGearState(_currentOffset);
     }
 
+    private void PlayShiftSfx()
+    {
+        _audio.pitch = Random.Range(0.9f, 1.2f);
+        _audio.volume = Random.Range(0.8f, 1f);
+        _audio.PlayOneShot(_currentGear == 0 ? _shiftSoundNeutral : _shiftSound);
+    }
+
     public void OnBeginDrag(PointerEventData eventData)
     {
         // vibrate or someth
+        PlayShiftSfx();
+
         _isDragging = true;
 
         if (_handleTransform != null)
@@ -137,6 +150,8 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
 
         return slotX;
     }
+
+
 
     private Vector2 ConstrainToStrictHPattern(Vector2 rawOffset, Vector2 currentOffset)
     {
@@ -272,6 +287,7 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
         if (_currentGear != previousGear)
         {
             OnGearChanged?.Invoke(_currentGear);
+            PlayShiftSfx();
         }
     }
 }
