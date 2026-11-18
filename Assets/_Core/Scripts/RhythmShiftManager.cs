@@ -17,8 +17,8 @@ public class RhythmShiftManager : MonoBehaviour
     [Header("Highway Settings")]
     [SerializeField] private float _spawnY = 400f;
     [SerializeField] private float _hitLineY = -150f;
-    [SerializeField] private float _noteSpeed = 300f;
-    [SerializeField] private float _spawnInterval = 1.5f;
+    [SerializeField] private float _baseNoteSpeed = 300f;
+    [SerializeField] private float _baseSpawnInterval = 1.5f;
     [SerializeField] private float _defaultNoteLength = 100f;
     [SerializeField] private float _holdTickInterval = 0.2f;
     [SerializeField] private float _highwayWidth = 400f;
@@ -45,6 +45,9 @@ public class RhythmShiftManager : MonoBehaviour
     private int _lastHitGear = -1;
     private bool _neutralVisitedSinceLastHit = false;
     private int _currentMultiplier = 1;
+    private bool _wasGameOver = false;
+
+    public bool IsGameOver => _gameManager != null && _gameManager.CurrentHealth <= 0;
 
     private void OnEnable()
     {
@@ -74,14 +77,48 @@ public class RhythmShiftManager : MonoBehaviour
 
     private void Update()
     {
+        if (IsGameOver)
+        {
+            if (!_wasGameOver)
+            {
+                TriggerGameOverState();
+                _wasGameOver = true;
+            }
+            return;
+        }
+
+        _wasGameOver = false;
+
         HandleSpawning();
         MoveAndEvaluateNotes();
         HandleFeedbackFade();
         UpdateUI();
     }
 
+    private void TriggerGameOverState()
+    {
+        foreach (var note in _activeNotes)
+        {
+            if (note != null)
+            {
+                Destroy(note.gameObject);
+            }
+        }
+        _activeNotes.Clear();
+
+        if (_txtFeedback != null) _txtFeedback.text = "GAME OVER";
+        _currentMultiplier = 1;
+        _lastHitGear = -1;
+        _neutralVisitedSinceLastHit = false;
+        _spawnTimer = 0f;
+
+        UpdateUI();
+    }
+
     private void HandleGearChanged(int gear)
     {
+        if (IsGameOver) return;
+
         _currentHeldGear = gear;
 
         if (gear == 0)
@@ -127,10 +164,14 @@ public class RhythmShiftManager : MonoBehaviour
 
     private void HandleSpawning()
     {
-        if (_shifterController == null || _notePrefab == null) return;
+        if (_shifterController == null || _notePrefab == null || _gameManager == null) return;
+
+        // Scale spawn frequency with speed so notes spawn faster as difficulty increases
+        float currentSpeedMultiplier = _gameManager.GlobalGameSpeed;
+        float adjustedSpawnInterval = _baseSpawnInterval / Mathf.Max(0.1f, currentSpeedMultiplier);
 
         _spawnTimer += Time.deltaTime;
-        if (_spawnTimer >= _spawnInterval)
+        if (_spawnTimer >= adjustedSpawnInterval)
         {
             _spawnTimer = 0f;
             SpawnNote();
@@ -154,7 +195,8 @@ public class RhythmShiftManager : MonoBehaviour
         RectTransform rect = note.RectTransform;
         rect.anchoredPosition = new Vector2(GetXPositionForGear(randomGear), _spawnY);
 
-        note.Initialize(randomGear, _noteSpeed, _defaultNoteLength);
+        float currentSpeedMultiplier = _gameManager != null ? _gameManager.GlobalGameSpeed : 1f;
+        note.Initialize(randomGear, _baseNoteSpeed * currentSpeedMultiplier, _defaultNoteLength);
         _activeNotes.Add(note);
     }
 
@@ -162,6 +204,7 @@ public class RhythmShiftManager : MonoBehaviour
     {
         bool isHoldingNote = false;
         ShiftNote lowestUnhitNote = GetLowestUnhitNote();
+        float currentSpeedMultiplier = _gameManager != null ? _gameManager.GlobalGameSpeed : 1f;
 
         for (int i = _activeNotes.Count - 1; i >= 0; i--)
         {
@@ -172,7 +215,8 @@ public class RhythmShiftManager : MonoBehaviour
                 continue;
             }
 
-            note.Move(Time.deltaTime);
+            // Move notes factoring in the global speed scaling
+            note.Move(Time.deltaTime * currentSpeedMultiplier);
             float noteHeadY = note.RectTransform.anchoredPosition.y;
 
             if (note == lowestUnhitNote && !note.IsHeadHit)
@@ -183,9 +227,7 @@ public class RhythmShiftManager : MonoBehaviour
                     {
                         note.IsHeadHit = true;
 
-                        // Granny shift gives points with NO multiplier change
                         AddScoreCustom(_grannyShiftPoints * _currentMultiplier);
-
                         ShowFeedback("GRANNY SHIFT", new Color(1f, 0.5f, 0f), allowOverwrite: true);
 
                         _lastHitGear = note.Gear;
@@ -254,7 +296,7 @@ public class RhythmShiftManager : MonoBehaviour
 
     private void HandleFeedbackFade()
     {
-        if (_txtFeedback != null && _txtFeedback.text != "")
+        if (_txtFeedback != null && _txtFeedback.text != "" && _txtFeedback.text != "GAME OVER")
         {
             _feedbackTimer += Time.deltaTime;
             if (_feedbackTimer >= 0.5f)
@@ -282,18 +324,16 @@ public class RhythmShiftManager : MonoBehaviour
         if (distance <= _perfectWindow)
         {
             basePts = _perfectPoints;
-            _currentMultiplier += 2; // Perfect increases multiplier by 2
+            _currentMultiplier += 2;
             ShowFeedback("PERFECT!", Color.cyan, allowOverwrite: true);
         }
         else if (distance <= _greatWindow)
         {
             basePts = _greatPoints;
-            // Great does NOT increase multiplier
             ShowFeedback("GREAT!", Color.green, allowOverwrite: true);
         }
         else
         {
-            // Good does NOT increase multiplier
             ShowFeedback("GOOD", Color.yellow, allowOverwrite: true);
         }
 
@@ -308,16 +348,16 @@ public class RhythmShiftManager : MonoBehaviour
         if (distance <= _perfectWindow)
         {
             basePts = _perfectPoints;
-            _currentMultiplier += 2; // Perfect Double Clutch increases multiplier by 2
+            _currentMultiplier += 2;
         }
         else if (distance <= _greatWindow)
         {
             basePts = _greatPoints;
-            _currentMultiplier += 1; // Great Double Clutch increases multiplier by 1
+            _currentMultiplier += 1;
         }
         else
         {
-            _currentMultiplier += 1; // Good Double Clutch increases multiplier by 1
+            _currentMultiplier += 1;
         }
 
         int finalPts = (basePts * _doubleClutchBonusMultiplier) * _currentMultiplier;
@@ -341,11 +381,19 @@ public class RhythmShiftManager : MonoBehaviour
         {
             if (_txtScore != null)
             {
-                _txtScore.text = $"Score: {_gameManager.Score}";
+                if (IsGameOver)
+                {
+                    _txtScore.text = "";
+                }
+                else
+                {
+                    _txtScore.text = $"Score: {_gameManager.Score}";
+                }
             }
+
             if (_txtMultiplier != null)
             {
-                if (_currentMultiplier <= 1)
+                if (_currentMultiplier <= 1 || IsGameOver)
                 {
                     _txtMultiplier.text = "";
                 }

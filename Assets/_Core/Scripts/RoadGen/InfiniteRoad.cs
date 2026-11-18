@@ -7,6 +7,8 @@ public class InfiniteRoad : MonoBehaviour
     [SerializeField] private float _segmentLength = 8f;
     [SerializeField] private List<Transform> _roadSegments = new();
 
+    private float _speedMultiplier = 1f;
+
     private void Update()
     {
         MoveSegments();
@@ -15,7 +17,8 @@ public class InfiniteRoad : MonoBehaviour
 
     private void MoveSegments()
     {
-        float movement = _moveSpeed * Time.deltaTime;
+        float movement = _moveSpeed * _speedMultiplier * Time.deltaTime;
+
         foreach (Transform segment in _roadSegments)
         {
             segment.Translate(Vector3.left * movement, Space.World);
@@ -38,5 +41,10 @@ public class InfiniteRoad : MonoBehaviour
             _roadSegments.RemoveAt(0);
             _roadSegments.Add(firstSegment);
         }
+    }
+
+    public void UpdateSpeedMultiplier(float multiplier)
+    {
+        _speedMultiplier = multiplier;
     }
 }

@@ -24,6 +24,10 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
     private bool _isDragging = false;
     private float _activeColumnX = 0f;
 
+    // Keyboard navigation state
+    private int _targetColumnIdx = 0;
+    private int _targetGate = 0; // 1 = Top, 0 = Neutral, -1 = Bottom
+
     [ShowNativeProperty]
     public int CurrentGear => _currentGear;
 
@@ -43,6 +47,7 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
             _centerPosition = _handleTransform.anchoredPosition;
             _currentOffset = _handleTransform.anchoredPosition - _centerPosition;
             _targetOffset = _currentOffset;
+            SyncIndicesFromOffset(_currentOffset);
         }
     }
 
@@ -50,12 +55,99 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
     {
         if (_handleTransform == null) return;
 
+        HandleKeyboardInput();
+
         // Smoothly lerp the shifter's physical position toward the target position
         _currentOffset = Vector2.Lerp(_currentOffset, _targetOffset, Time.deltaTime * _lerpSpeed);
         _handleTransform.anchoredPosition = _centerPosition + _currentOffset;
 
         // Gear state is evaluated based on where the shifter ACTUALLY is (arrived position)
         UpdateGearState(_currentOffset);
+    }
+
+    private void HandleKeyboardInput()
+    {
+        float[] slotX = GetSlotXPositionsPublic();
+        int columns = slotX.Length;
+        bool inputDetected = false;
+
+        if (Input.GetKeyDown(KeyCode.LeftArrow))
+        {
+            _targetColumnIdx = Mathf.Max(0, _targetColumnIdx - 1);
+            inputDetected = true;
+        }
+        else if (Input.GetKeyDown(KeyCode.RightArrow))
+        {
+            _targetColumnIdx = Mathf.Min(columns - 1, _targetColumnIdx + 1);
+            inputDetected = true;
+        }
+
+        if (Input.GetKeyDown(KeyCode.UpArrow))
+        {
+            _targetGate = Mathf.Min(1, _targetGate + 1);
+            inputDetected = true;
+        }
+        else if (Input.GetKeyDown(KeyCode.DownArrow))
+        {
+            int minGate = (_totalGears % 2 != 0 && _targetColumnIdx == columns - 1) ? 0 : -1;
+            _targetGate = Mathf.Max(minGate, _targetGate - 1);
+            inputDetected = true;
+        }
+
+        if (inputDetected)
+        {
+            if (_isDragging) _isDragging = false;
+
+            float targetX = slotX[_targetColumnIdx];
+            float targetY = 0f;
+            if (_targetGate == 1) targetY = _slotHeight;
+            else if (_targetGate == -1) targetY = -_slotHeight;
+
+            _targetOffset = new Vector2(targetX, targetY);
+
+            // Snap instantly if another movement input happens rapidly while still moving
+            if (Vector2.Distance(_currentOffset, _targetOffset) > 1f)
+            {
+                _currentOffset = _targetOffset;
+            }
+        }
+    }
+
+    private void SyncIndicesFromOffset(Vector2 offset)
+    {
+        float[] slotX = GetSlotXPositionsPublic();
+        float closestX = slotX[0];
+        int closestCol = 0;
+        float minDist = Mathf.Abs(offset.x - slotX[0]);
+
+        for (int i = 1; i < slotX.Length; i++)
+        {
+            float dist = Mathf.Abs(offset.x - slotX[i]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                closestCol = i;
+                closestX = slotX[i];
+            }
+        }
+
+        _targetColumnIdx = closestCol;
+        _activeColumnX = closestX;
+
+        if (offset.y > _slotHeight * 0.3f)
+        {
+            _targetGate = 1;
+        }
+        else if (offset.y < -_slotHeight * 0.3f)
+        {
+            bool hasOddTotalGears = (_totalGears % 2 != 0);
+            bool isLastColumn = (_targetColumnIdx == slotX.Length - 1);
+            _targetGate = (hasOddTotalGears && isLastColumn) ? 0 : -1;
+        }
+        else
+        {
+            _targetGate = 0;
+        }
     }
 
     private void PlayShiftSfx()
@@ -67,9 +159,7 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
 
     public void OnBeginDrag(PointerEventData eventData)
     {
-        // vibrate or someth
         PlayShiftSfx();
-
         _isDragging = true;
 
         if (_handleTransform != null)
@@ -109,7 +199,6 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
             return;
         }
 
-        // Set the target offset; the Update loop will smoothly lerp the handle toward it
         _targetOffset = ConstrainToStrictHPattern(rawOffset, _currentOffset);
     }
 
@@ -125,6 +214,7 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
         if (_handleTransform == null) return;
 
         _targetOffset = SnapToGate(_currentOffset);
+        SyncIndicesFromOffset(_targetOffset);
     }
 
     public float[] GetSlotXPositionsPublic()
@@ -150,8 +240,6 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
 
         return slotX;
     }
-
-
 
     private Vector2 ConstrainToStrictHPattern(Vector2 rawOffset, Vector2 currentOffset)
     {
@@ -283,7 +371,6 @@ public class ShifterController : MonoBehaviour, IDragHandler, IBeginDragHandler,
             txt_currentGear.text = _currentGear == 0 ? "N" : _currentGear.ToString();
         }
 
-        // Fire event only when gear changes
         if (_currentGear != previousGear)
         {
             OnGearChanged?.Invoke(_currentGear);
